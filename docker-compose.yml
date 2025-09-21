@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # Simplified setup - just the essentials
+  
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: resume-ai-postgres
+    environment:
+      POSTGRES_DB: resume_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend (using python base image)
+  backend:
+    image: python:3.11-slim
+    container_name: resume-ai-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/resume_ai
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-your_openai_key_here}
+      - SECRET_KEY=${SECRET_KEY:-your-super-secret-key-change-in-production}
+      - DEBUG=True
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      bash -c "
+        pip install -r requirements.txt &&
+        python -m spacy download en_core_web_sm &&
+        python scripts/setup_database.py &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # Streamlit Frontend
+  frontend:
+    image: python:3.11-slim
+    container_name: resume-ai-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://backend:8000
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      - backend
+    command: >
+      bash -c "
+        pip install streamlit plotly pandas requests &&
+        streamlit run frontend/streamlit_app/main.py --server.port=8501 --server.address=0.0.0.0
+      "
+
+volumes:
+  postgres_data:
